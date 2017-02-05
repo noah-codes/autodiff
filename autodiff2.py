@@ -1,15 +1,31 @@
 import numpy as np
 import math as math
 
+class UnaryOp:
+    def __init__(self, parent, name=""):
+        self.parent = parent
+        self.name = name
+
+class BinaryOp:
+    def __init__(self, left, right, name=""):
+        self.left = left
+        self.right = right
+        self.name = name
+        
+class MultiOp:
+    def __init__(self, inputs, name=""):
+        self.inputs = inputs
+        self.name = name
+
 class Const:
     def __init__(self, value, name=""):
         self.value = value
         self.name = name
 
-    def eval(self, inputs):
+    def eval(self):
         return self.value
 
-    def bprop(self, inputs, op, gradient):
+    def bprop(self, op, gradient):
         return Const(0)
         
 class Var:
@@ -17,72 +33,75 @@ class Var:
        self.value = value
        self.name = name
     
-    def eval(self, inputs):
-        assert len(inputs) == 0
+    def eval(self):
         return self.value
 
-    def bprop(self, inputs, op, gradient):
-        assert len(inputs) == 0
-        return Const(int(op is self))
+    def bprop(self, op, gradient):
+        return Const(0)
       
     def set(self, value):
         self.value = value
 
-class AddOp:
-    def __init__(self, name=""):
-        self.name = name
+class AddOp(BinaryOp):
+    def __init__(self, left, right, name=""):
+        BinaryOp.__init__(self, left, right, name)
 
-    def eval(self, inputs):
-        assert len(inputs) == 2
-        return np.add(inputs[0].eval(), inputs[1].eval())
+    def eval(self):
+        return self.left.eval() + self.right.eval()
 
-    def bprop(self, inputs, op, gradient):
-        assert len(inputs) == 2
-        if op in inputs:
+    def bprop(self, op, gradient):
+        if op is self.left or op is self.right:
             return gradient
         else:
             return Const(0)
             
-class SumOp:
-    def __init__(self, name=""):
-        self.name = name
+class SumOp(MultiOp):
+    def __init__(self, inputs, name=""):
+        MultiOp.__init__(self, inputs, name)
     
-    def eval(self, inputs):
-      return np.sum([op.eval() for op in inputs])
+    def eval(self):
+      return np.sum([input.eval() for input in self.inputs])
       
-    def bprop(self, inputs, op, gradient):
-      if op in inputs
+    def bprop(self, op, gradient):
+      if op in self.inputs:
         return gradient
       else:
         return Const(0)
         
-class MultOp:
-    def __init__(self, name="", transpose_a=False, transpose_b=False):
-        self.name = name
+class MultOp(BinaryOp):
+    def __init__(self, left, right, name=""):
+        BinaryOp.__init__(self, left, right, name)
 
-    def eval(self, inputs):
-        assert len(inputs) == 2
-        return np.dot(inputs[0], inputs[1])
+    def eval(self):
+        return self.left.eval() * self.right.eval()
 
-    def bprop(self, inputs, op, gradient):
-        assert len(inputs) == 2
-        if op is inputs[0]:
-            return MultOp(gradient, inputs[1], transpose_b=True)
+    def bprop(self, op, gradient):
+        if op is self.left:
+            return MultOp(self.right, gradient)
         elif op is self.right:
-            return MultOp(inputs[0], gradient, transpose_a=True)
+            return MultOp(self.left, gradient)
+        else:
+            return Const(0)
+
+class ExpOp(UnaryOp):
+    def __init__(self, parent, name=""):
+        UnaryOp.__init__(self, parent, name)
+
+    def eval(self):
+        return math.exp(self.parent.eval())
+
+    def bprop(self, op, gradient):
+        if op is self.parent:
+            return MultOp(gradient, ExpOp(self.parent))
         else:
             return Const(0)
 
 graph_children = {}
-graph_parents = {}
 
 def add_edge(source, dest):
     if not source in graph_children:
         graph_children[source] = []
-    if not dest in graph_parents:
-        graph_parents[dest] = []
     graph_children[source].append(dest)
-    graph_parents[dest].append(source)
 
 def Add(left, right, name=""):
     op = AddOp(left, right, name)
@@ -96,6 +115,11 @@ def Mult(left, right, name=""):
     add_edge(right, op)
     return op
 
+def Exp(parent, name=""):
+    op = ExpOp(parent, name)
+    add_edge(parent, op)
+    return op
+    
 # compute dz/dx (x is op)
 def build_gradient(op, grad_table):
     if op in grad_table:
@@ -106,7 +130,7 @@ def build_gradient(op, grad_table):
         # get dz/dy
         gradient = build_gradient(child, table)
         # dz/dx = dy/dx * dz/dy
-        grad_piece = child.bprop(graph_parents[child], op, gradient)
+        grad_piece = child.bprop(op, gradient)
         # if z = z(y, a, b, etc.)
         grad_list.append(grad_piece)
     # dz/dx = dy/dx * dz/dy + da/dx * dz/da + ...
